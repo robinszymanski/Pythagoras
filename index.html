@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <title>Satz des Pythagoras in 3D | XR Blocks</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
+    <script>
+      window.litDisableBundleWarning = true;
+    </script>
+    
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
+          "three/": "https://cdn.jsdelivr.net/npm/three@0.182.0/",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
+          "troika-three-text": "https://cdn.jsdelivr.net/gh/protectwise/troika@028b81cf308f0f22e5aa8e78196be56ec1997af5/packages/troika-three-text/src/index.js",
+          "troika-three-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-three-utils/src/index.js",
+          "troika-worker-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-worker-utils/src/index.js",
+          "bidi-js": "https://esm.sh/bidi-js@%5E1.0.2?target=es2022",
+          "webgl-sdf-generator": "https://esm.sh/webgl-sdf-generator@1.1.1/es2022/webgl-sdf-generator.mjs",
+          "lit": "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js",
+          "lit/": "https://esm.run/lit@3/",
+          "@pmndrs/uikit": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit@1.0.56/dist/index.min.js",
+          "@pmndrs/uikit-pub-sub": "https://cdn.jsdelivr.net/npm/@pmndrs/uikit-pub-sub@1.0.56/dist/index.min.js",
+          "@pmndrs/msdfonts": "https://cdn.jsdelivr.net/npm/@pmndrs/msdfonts@1.0.56/dist/index.min.js",
+          "@preact/signals-core": "https://cdn.jsdelivr.net/npm/@preact/signals-core@1.12.1/dist/signals-core.mjs",
+          "yoga-layout/load": "https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/dist/src/load.js",
+          "xrblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.16.0/build/xrblocks.js",
+          "xrblocks/addons/": "https://cdn.jsdelivr.net/npm/xrblocks@0.16.0/build/addons/",
+          "uiblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.16.0/build/addons/uiblocks/src/index.js"
+        }
+      }
+    </script>
+  </head>
+
+  <body>
+    <script type="module">
+      import 'xrblocks/addons/simulator/SimulatorAddons.js';
+      
+      import * as THREE from 'three';
+      import * as uikit from '@pmndrs/uikit';
+      import { UICore, UIPanel, UIText, ManipulationBehavior } from 'uiblocks';
+      import { Text } from 'troika-three-text';
+      import * as xb from 'xrblocks';
+
+      // Data defining the step-by-step logic for the math discovery
+      const STEPS = [
+        {
+          title: "Pythagoras in 3D",
+          desc: [
+            "Finde die Raumdiagonale d!",
+            "Wir kennen die Kanten unseres Quaders:",
+            "Breite a = 3",
+            "Tiefe b = 4",
+            "Höhe c = 12",
+            "",
+            "Klicke auf 'Weiter' um zu starten."
+          ],
+          showBaseTri: false, showVertTri: false, showE: false, showD: false,
+          textE: "?", textD: "?"
+        },
+        {
+          title: "1. Die Bodendiagonale",
+          desc: [
+            "Berechne zuerst die Bodendiagonale e.",
+            "Das Bodendreieck (blau) ist rechtwinklig!",
+            "a² + b² = e²",
+            "3² + 4² = e²",
+            "9 + 16 = 25",
+            "e = √25 = 5"
+          ],
+          showBaseTri: true, showVertTri: false, showE: true, showD: false,
+          textE: "e = 5", textD: "?"
+        },
+        {
+          title: "2. Die Raumdiagonale",
+          desc: [
+            "Nun betrachten wir das stehende Dreieck (rot).",
+            "Es wird durch e, c und d gebildet.",
+            "Auch dieses hat unten einen rechten Winkel!",
+            "e² + c² = d²",
+            "5² + 12² = d²",
+            "25 + 144 = 169",
+            "d = √169 = 13"
+          ],
+          showBaseTri: false, showVertTri: true, showE: true, showD: true,
+          textE: "e = 5", textD: "d = 13"
+        },
+        {
+          title: "Die 3D Formel",
+          desc: [
+            "Zusammenfassung:",
+            "Wenn wir e² = a² + b² in die zweite Gleichung einsetzen, erhalten wir den Pythagoras im 3D-Raum:",
+            "d² = a² + b² + c²",
+            "d = √(3² + 4² + 12²) = 13",
+            "",
+            "Du hast die Raumdiagonale erfolgreich berechnet!"
+          ],
+          showBaseTri: true, showVertTri: true, showE: true, showD: true,
+          textE: "e = 5", textD: "d = 13"
+        }
+      ];
+
+      class PythagorasApp extends xb.Script {
+        constructor() {
+          super();
+          this.uiCore = new UICore(this);
+          this.currentStep = 0;
+          this.labels = [];
+        }
+
+        async init() {
+          // Add basic lighting
+          this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
+          const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+          dirLight.position.set(2, 5, 3);
+          this.add(dirLight);
+
+          // Group for all 3D geometry
+          this.sceneGroup = new THREE.Group();
+          // Position it comfortably in front of the user
+          this.sceneGroup.position.set(0, 1.2, -1.2);
+          // Add a slight rotation so the 3D aspect is visible immediately
+          this.sceneGroup.rotation.set(Math.PI / 12, -Math.PI / 6, 0);
+          this.add(this.sceneGroup);
+
+          this.build3DGeometry();
+          this.buildUI();
+          this.renderStep();
+        }
+
+        buildUI() {
+          const card = this.uiCore.createCard({
+            name: 'MathExplainerCard',
+            sizeX: 1.2,
+            sizeY: 1.0,
+            position: new THREE.Vector3(0, 1.7, -1.8),
+            behaviors: [
+              new ManipulationBehavior({
+                draggable: true,
+                manipulationMargin: 50,
+                manipulationCornerRadius: 40,
+              }),
+            ],
+          });
+
+          const mainPanel = new UIPanel({
+            width: '100%',
+            height: '100%',
+            fillColor: 'rgba(25, 30, 40, 0.95)',
+            cornerRadius: 40,
+            padding: 40,
+            flexDirection: 'column',
+            justifyContent: 'flex-start',
+            alignItems: 'stretch',
+            gap: 20,
+            strokeWidth: 2,
+            strokeColor: 'rgba(255, 255, 255, 0.2)'
+          });
+          card.add(mainPanel);
+
+          // Title
+          this.titleText = new UIText("Lade...", {
+            fontSize: 60,
+            fontWeight: 'bold',
+            color: '#61dafb',
+            textAlign: 'center'
+          });
+          mainPanel.add(this.titleText);
+
+          // Dynamic Text Container (for line breaks)
+          this.descContainer = new UIPanel({
+            width: '100%',
+            flexGrow: 1,
+            flexDirection: 'column',
+            justifyContent: 'flex-start',
+            alignItems: 'flex-start',
+            gap: 10
+          });
+          mainPanel.add(this.descContainer);
+
+          // Buttons Row
+          const btnRow = new UIPanel({
+            flexDirection: 'row',
+            width: '100%',
+            height: 80,
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 'auto'
+          });
+
+          this.prevBtn = this.createButton("Zurück", () => this.changeStep(-1));
+          this.nextBtn = this.createButton("Weiter", () => this.changeStep(1));
+
+          btnRow.add(this.prevBtn);
+          btnRow.add(this.nextBtn);
+          mainPanel.add(btnRow);
+        }
+
+        createButton(text, onClick) {
+          let isHovered = false;
+          const btn = new UIPanel({
+            width: 220,
+            height: 70,
+            cornerRadius: 20,
+            fillColor: '#3a4454',
+            justifyContent: 'center',
+            alignItems: 'center',
+            onHoverEnter: () => {
+              isHovered = true;
+              btn.setFillColor('#505c70');
+            },
+            onHoverExit: () => {
+              isHovered = false;
+              btn.setFillColor('#3a4454');
+            },
+            onClick: () => {
+              // Click feedback flash
+              btn.setFillColor('#61dafb');
+              setTimeout(() => btn.setFillColor(isHovered ? '#505c70' : '#3a4454'), 150);
+              onClick();
+            }
+          });
+          
+          const btnText = new UIText(text, { fontSize: 32, color: 'white', fontWeight: 'bold' });
+          btn.add(btnText);
+          return btn;
+        }
+
+        build3DGeometry() {
+          // Scale factor for visuals (a=3, b=4, c=12 mapped to meters)
+          const S = 0.04; 
+          const a = 3 * S; // 0.12
+          const b = 4 * S; // 0.16
+          const c = 12 * S; // 0.48
+
+          // Vertices defined so that bottom-left-front is at a convenient offset
+          // We will center the geometry around (0,0,0) for balanced rotation
+          const v0 = new THREE.Vector3(-a/2, -c/2, -b/2); // Origin corner
+          const va = new THREE.Vector3(a/2, -c/2, -b/2); // Along X (width a)
+          const vab = new THREE.Vector3(a/2, -c/2, b/2); // Along X and Z (base diagonal corner)
+          const vabc = new THREE.Vector3(a/2, c/2, b/2); // Top opposite corner (space diagonal)
+
+          // 1. Transparent Cuboid Box
+          const boxGeo = new THREE.BoxGeometry(a, c, b);
+          const boxMat = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.1,
+            roughness: 0.1,
+            metalness: 0.2,
+            side: THREE.DoubleSide
+          });
+          const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+          this.sceneGroup.add(boxMesh);
+
+          // 2. White outline for all edges
+          const edges = new THREE.EdgesGeometry(boxGeo);
+          const outline = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }));
+          this.sceneGroup.add(outline);
+
+          // 3. Base Triangle (Blue)
+          const baseTriGeo = new THREE.BufferGeometry().setFromPoints([v0, va, vab]);
+          this.baseTri = new THREE.Mesh(baseTriGeo, new THREE.MeshBasicMaterial({ color: 0x4796e3, transparent: true, opacity: 0.4, side: THREE.DoubleSide }));
+          this.sceneGroup.add(this.baseTri);
+
+          // 4. Vertical Triangle (Red)
+          const vertTriGeo = new THREE.BufferGeometry().setFromPoints([v0, vab, vabc]);
+          this.vertTri = new THREE.Mesh(vertTriGeo, new THREE.MeshBasicMaterial({ color: 0xe05a66, transparent: true, opacity: 0.4, side: THREE.DoubleSide }));
+          this.sceneGroup.add(this.vertTri);
+
+          // 5. Lines for diagonals
+          this.lineE = new THREE.Line(new THREE.BufferGeometry().setFromPoints([v0, vab]), new THREE.LineBasicMaterial({ color: 0x4796e3, linewidth: 4 }));
+          this.sceneGroup.add(this.lineE);
+
+          this.lineD = new THREE.Line(new THREE.BufferGeometry().setFromPoints([v0, vabc]), new THREE.LineBasicMaterial({ color: 0xe05a66, linewidth: 4 }));
+          this.sceneGroup.add(this.lineD);
+
+          // 6. Labels (using troika-three-text)
+          this.labelA = this.createLabel("a = 3", new THREE.Vector3(0, -c/2 - 0.03, -b/2), 0xffffff);
+          this.labelB = this.createLabel("b = 4", new THREE.Vector3(a/2 + 0.03, -c/2, 0), 0xffffff);
+          this.labelC = this.createLabel("c = 12", new THREE.Vector3(a/2 + 0.03, 0, b/2 + 0.03), 0xffffff);
+          this.labelE = this.createLabel("e = ?", new THREE.Vector3(0, -c/2 + 0.04, 0), 0x61dafb);
+          this.labelD = this.createLabel("d = ?", new THREE.Vector3(-0.02, 0, 0), 0xff9999);
+        }
+
+        createLabel(text, pos, colorHex) {
+          const label = new Text();
+          label.text = text;
+          label.fontSize = 0.035;
+          label.color = colorHex;
+          label.position.copy(pos);
+          label.anchorX = 'center';
+          label.anchorY = 'middle';
+          label.outlineWidth = 0.005;
+          label.outlineColor = '#000000';
+          this.sceneGroup.add(label);
+          this.labels.push(label);
+          label.sync();
+          return label;
+        }
+
+        changeStep(dir) {
+          this.currentStep += dir;
+          if (this.currentStep < 0) this.currentStep = 0;
+          if (this.currentStep >= STEPS.length) this.currentStep = STEPS.length - 1;
+          this.renderStep();
+        }
+
+        renderStep() {
+          const step = STEPS[this.currentStep];
+          
+          // Update UI
+          this.titleText.setProperties({ text: step.title });
+          
+          // Rebuild Description Text Lines
+          this.descContainer.clear();
+          step.desc.forEach(line => {
+            const lineText = new UIText(line, { fontSize: 32, color: '#dddddd', height: line === "" ? 20 : 'auto' });
+            this.descContainer.add(lineText);
+          });
+
+          // Toggle Buttons
+          this.prevBtn.setProperties({ display: this.currentStep === 0 ? 'none' : 'flex' });
+          this.nextBtn.setProperties({ display: this.currentStep === STEPS.length - 1 ? 'none' : 'flex' });
+
+          // Update Scene Visibility
+          this.baseTri.visible = step.showBaseTri;
+          this.vertTri.visible = step.showVertTri;
+          this.lineE.visible = step.showE;
+          this.lineD.visible = step.showD;
+          this.labelE.visible = step.showE;
+          this.labelD.visible = step.showD;
+
+          // Update Label Texts
+          this.labelE.text = step.textE;
+          this.labelD.text = step.textD;
+          this.labelE.sync();
+          this.labelD.sync();
+        }
+
+        update() {
+          // Ensure all active text labels look directly at the user
+          const cameraPos = xb.core.camera.position;
+          this.labels.forEach(label => {
+            if (label.visible) {
+              label.lookAt(cameraPos);
+            }
+          });
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        const options = new xb.Options();
+        options.enableUI();
+        options.uikit.enable(uikit);
+        options.setAppTitle('Pythagoras 3D');
+        
+        xb.add(new PythagorasApp());
+        await xb.init(options);
+      });
+    </script>
+  </body>
+</html>
