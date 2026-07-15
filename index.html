@@ -1,15 +1,11 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
-    <title>Vektorgeometrie: Pyramide | XR Blocks</title>
+    <title>Vektorgeometrie Pyramide | XR Blocks</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
     
-    <!-- WebXR Polyfill für iOS/Safari Fallback -->
-    <script src="https://cdn.jsdelivr.net/npm/webxr-polyfill@2.0.3/build/webxr-polyfill.js"></script>
     <script>
-      // Initialisiere den Polyfill, bevor die 3D-Engine oder XRBlocks geladen wird
-      var polyfill = new WebXRPolyfill();
       window.litDisableBundleWarning = true;
     </script>
     
@@ -19,7 +15,6 @@
           "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
           "three/": "https://cdn.jsdelivr.net/npm/three@0.182.0/",
           "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
-          "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
           "troika-three-text": "https://cdn.jsdelivr.net/gh/protectwise/troika@028b81cf308f0f22e5aa8e78196be56ec1997af5/packages/troika-three-text/src/index.js",
           "troika-three-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-three-utils/src/index.js",
           "troika-worker-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-worker-utils/src/index.js",
@@ -49,465 +44,348 @@
       import { UICore, UIPanel, UIText, ManipulationBehavior, raycastSortFunction } from 'uiblocks';
       import { Text } from 'troika-three-text';
 
-      /**
-       * Hauptklasse des Applets, verwaltet die 3D-Szene, die mathematischen Visualisierungen
-       * und das Spatial UI.
-       */
-      class MathPyramidApplet extends xb.Script {
+      class PyramidMathApplet extends xb.Script {
         constructor() {
           super();
           this.uiCore = new UICore(this);
           
-          // Gruppen für verschiedene Visualisierungsszenarien
-          this.pyramidGroup = new THREE.Group();
-          this.scenario1Group = new THREE.Group(); // Kantenvektoren
-          this.scenario2Group = new THREE.Group(); // Mittelpunkt & Höhe
-          this.scenario3Group = new THREE.Group(); // Schattenwurf (Schnittpunkt Gerade-Ebene)
-          
-          // Referenzen im UI
-          this.explanationText = null;
-          this.hintTextObj = null;
-          this.coordBtnText = null;
-          
-          // State-Management für Hilfen und Koordinaten
-          this.currentScenarioId = 0;
+          // State-Variablen für das interaktive Lernen
+          this.currentTask = 0;
           this.showCoordinates = false;
-          this.labels = []; // Speichert alle Punkt-Beschriftungen zum dynamischen Aktualisieren
+          this.showHint = false;
+          
+          // Referenzen für 3D-Objekte
+          this.pyramidGroup = new THREE.Group();
+          this.labels = [];
+          this.taskObjects = new THREE.Group();
+          
+          // Definition der Eckpunkte der Pyramide (in lokalen Koordinaten)
+          this.points = {
+            A: new THREE.Vector3(-2, 0, 2),
+            B: new THREE.Vector3(2, 0, 2),
+            C: new THREE.Vector3(2, 0, -2),
+            D: new THREE.Vector3(-2, 0, -2),
+            S: new THREE.Vector3(0, 4, 0), // Spitze
+            L: new THREE.Vector3(-4, 6, 4) // Lichtquelle für Schatten
+          };
         }
 
         async init() {
-          // Raycaster für uiblocks vorbereiten
+          // Raycaster für UI-Interaktionen vorbereiten
           if (xb.core.input.raycaster) {
             xb.core.input.raycaster.sortFunction = raycastSortFunction;
           }
 
           // Beleuchtung hinzufügen
           this.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
-          const dirLight = new THREE.DirectionalLight(0xffddaa, 3);
-          dirLight.position.set(2, 4, 2);
+          const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+          dirLight.position.set(5, 10, 5);
           this.add(dirLight);
 
-          // Bodenraster zur Orientierung (x-z Ebene, y=0)
-          const gridHelper = new THREE.GridHelper(4, 20, 0x888888, 0x444444);
-          gridHelper.position.set(0, 0, -1.5);
-          this.add(gridHelper);
-
-          // Hauptgruppe positionieren (vor dem Nutzer)
-          this.pyramidGroup.position.set(0, 0.01, -1.5); 
+          // Pyramide im Raum positionieren
+          this.pyramidGroup.position.set(0, 0.8, -1.5);
+          this.pyramidGroup.scale.set(0.2, 0.2, 0.2); // Herunterskalieren für AR
           this.add(this.pyramidGroup);
+          this.pyramidGroup.add(this.taskObjects); // Hier kommen Pfeile/Schatten rein
 
-          this.buildPyramidModel();
-          this.buildMathematicalScenarios();
+          this.buildPyramidGeometry();
           this.createUI();
-
-          // Initiale Ansicht setzen
-          this.showScenario(0);
+          this.updateTaskState(); // Initiale Aufgabe laden
         }
 
-        buildPyramidModel() {
-          // Geometrie der Pyramide definieren (Basis: 1x1, Höhe: 1.2)
-          this.pts = {
-            A: new THREE.Vector3(-0.5, 0, 0.5),
-            B: new THREE.Vector3(0.5, 0, 0.5),
-            C: new THREE.Vector3(0.5, 0, -0.5),
-            D: new THREE.Vector3(-0.5, 0, -0.5),
-            S: new THREE.Vector3(0, 1.2, 0)
-          };
+        buildPyramidGeometry() {
+          const material = new THREE.LineBasicMaterial({ color: 0x4796e3, linewidth: 2 });
+          const baseMaterial = new THREE.LineDashedMaterial({ color: 0x999999, dashSize: 0.2, gapSize: 0.1 });
+          
+          // Grundfläche zeichnen (A -> B -> C -> D -> A)
+          const basePoints = [this.points.A, this.points.B, this.points.C, this.points.D, this.points.A];
+          const baseGeo = new THREE.BufferGeometry().setFromPoints(basePoints);
+          const baseLine = new THREE.Line(baseGeo, material);
+          this.pyramidGroup.add(baseLine);
 
-          // Halbtransparenter Körper
-          const geometry = new THREE.BufferGeometry();
-          const vertices = new Float32Array([
-            // Basis
-            -0.5, 0, 0.5,   0.5, 0, 0.5,   0.5, 0, -0.5,
-            -0.5, 0, 0.5,   0.5, 0, -0.5, -0.5, 0, -0.5,
-            // Vorne
-            -0.5, 0, 0.5,   0.5, 0, 0.5,   0, 1.2, 0,
-            // Rechts
-             0.5, 0, 0.5,   0.5, 0, -0.5,  0, 1.2, 0,
-            // Hinten
-             0.5, 0, -0.5, -0.5, 0, -0.5,  0, 1.2, 0,
-            // Links
-            -0.5, 0, -0.5, -0.5, 0, 0.5,   0, 1.2, 0
-          ]);
-          geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-          geometry.computeVertexNormals();
-
-          const material = new THREE.MeshPhongMaterial({
-            color: 0xedc9af, // Sandfarbe
-            transparent: true,
-            opacity: 0.6,
-            side: THREE.DoubleSide,
-            flatShading: true
+          // Kanten zur Spitze zeichnen (A->S, B->S, C->S, D->S)
+          const edges = [this.points.A, this.points.B, this.points.C, this.points.D];
+          edges.forEach(point => {
+            const edgeGeo = new THREE.BufferGeometry().setFromPoints([point, this.points.S]);
+            this.pyramidGroup.add(new THREE.Line(edgeGeo, material));
           });
-          const mesh = new THREE.Mesh(geometry, material);
-          this.pyramidGroup.add(mesh);
 
-          // Kanten (Wireframe) für bessere Lesbarkeit
-          const edges = new THREE.EdgesGeometry(geometry);
-          const lineMaterial = new THREE.LineBasicMaterial({ color: 0x8b4513, linewidth: 2 });
-          const wireframe = new THREE.LineSegments(edges, lineMaterial);
-          this.pyramidGroup.add(wireframe);
+          // Knotenpunkte (Kugeln) und Beschriftungen hinzufügen
+          Object.entries(this.points).forEach(([name, pos]) => {
+            if(name === 'L') return; // Lichtquelle kommt später
+            
+            const sphereGeom = new THREE.SphereGeometry(0.1, 16, 16);
+            const sphereMat = new THREE.MeshPhongMaterial({ color: 0xca6673 });
+            const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+            sphere.position.copy(pos);
+            this.pyramidGroup.add(sphere);
 
-          // Eckpunkte beschriften
-          this.addPointLabel('A', this.pts.A);
-          this.addPointLabel('B', this.pts.B);
-          this.addPointLabel('C', this.pts.C);
-          this.addPointLabel('D', this.pts.D);
-          this.addPointLabel('S', this.pts.S);
-        }
-
-        addPointLabel(text, position, color = '#ffffff', parentGroup = this.pyramidGroup) {
-          const label = new Text();
-          label.fontSize = 0.1;
-          label.color = color;
-          label.position.copy(position).add(new THREE.Vector3(0.05, 0.05, 0));
-          parentGroup.add(label);
-          
-          // Label in der Liste speichern, um Koordinaten dynamisch umzuschalten
-          const labelInfo = { label, name: text, position: position.clone() };
-          this.labels.push(labelInfo);
-          this.updateLabelText(labelInfo);
-          
-          return label;
-        }
-
-        updateLabelText(info) {
-          // Formatiere die Koordinaten auf eine Nachkommastelle, falls aktiviert
-          const coordStr = this.showCoordinates 
-            ? `\n(${info.position.x.toFixed(1)}|${info.position.y.toFixed(1)}|${info.position.z.toFixed(1)})` 
-            : "";
-          info.label.text = info.name + coordStr;
-          info.label.sync();
-        }
-
-        toggleCoordinates() {
-          this.showCoordinates = !this.showCoordinates;
-          this.labels.forEach(info => this.updateLabelText(info));
-          if(this.coordBtnText) {
-            this.coordBtnText.setText(this.showCoordinates ? 'Koordinaten: An' : 'Koordinaten: Aus');
-          }
-        }
-
-        createVectorArrow(origin, target, color, labelText) {
-          const dir = new THREE.Vector3().subVectors(target, origin);
-          const length = dir.length();
-          dir.normalize();
-          
-          const arrowHelper = new THREE.ArrowHelper(dir, origin, length, color, 0.1, 0.05);
-          
-          if (labelText) {
+            // Troika Text für die Beschriftung (A, B, C, D, S)
             const label = new Text();
-            label.text = labelText;
-            label.fontSize = 0.08;
-            label.color = color;
-            // Position in the middle of the vector
-            const midPoint = new THREE.Vector3().addVectors(origin, target).multiplyScalar(0.5);
-            label.position.copy(midPoint).add(new THREE.Vector3(0, 0.05, 0));
+            label.text = name;
+            label.fontSize = 0.5;
+            label.color = 0xffffff;
+            label.position.copy(pos).add(new THREE.Vector3(0.2, 0.2, 0));
             label.sync();
-            arrowHelper.add(label);
-          }
-          
-          return arrowHelper;
-        }
-
-        buildMathematicalScenarios() {
-          // Szene 1: Vektoren aufspannen (Basis und Kante)
-          this.pyramidGroup.add(this.scenario1Group);
-          this.scenario1Group.add(this.createVectorArrow(this.pts.A, this.pts.B, 0xff0000, 'v_AB'));
-          this.scenario1Group.add(this.createVectorArrow(this.pts.A, this.pts.D, 0x00ff00, 'v_AD'));
-          this.scenario1Group.add(this.createVectorArrow(this.pts.A, this.pts.S, 0x0000ff, 'v_AS'));
-
-          // Szene 2: Mittelpunkt und Höhe
-          this.pyramidGroup.add(this.scenario2Group);
-          const M = new THREE.Vector3().addVectors(this.pts.A, this.pts.C).multiplyScalar(0.5);
-          
-          // Diagonalen
-          const matDiag = new THREE.LineDashedMaterial({ color: 0xaaaaaa, dashSize: 0.05, gapSize: 0.05 });
-          const geomAC = new THREE.BufferGeometry().setFromPoints([this.pts.A, this.pts.C]);
-          const lineAC = new THREE.Line(geomAC, matDiag);
-          lineAC.computeLineDistances();
-          this.scenario2Group.add(lineAC);
-          
-          const geomBD = new THREE.BufferGeometry().setFromPoints([this.pts.B, this.pts.D]);
-          const lineBD = new THREE.Line(geomBD, matDiag);
-          lineBD.computeLineDistances();
-          this.scenario2Group.add(lineBD);
-
-          this.addPointLabel('M', M, '#ffff00', this.scenario2Group);
-          this.scenario2Group.add(this.createVectorArrow(M, this.pts.S, 0xffff00, 'h'));
-
-          // Szene 3: Schattenwurf (Gerade-Ebene-Schnitt)
-          this.pyramidGroup.add(this.scenario3Group);
-          
-          // Lichtquelle (Sonne)
-          const L = new THREE.Vector3(-1.5, 2.5, -1.0);
-          this.addPointLabel('L', L, '#ffaa00', this.scenario3Group);
-          
-          // Sonnensymbol
-          const sunGeom = new THREE.SphereGeometry(0.05);
-          const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
-          const sunMesh = new THREE.Mesh(sunGeom, sunMat);
-          sunMesh.position.copy(L);
-          this.scenario3Group.add(sunMesh);
-
-          // Richtungsvektor des Lichts: d = S - L
-          const dirLicht = new THREE.Vector3().subVectors(this.pts.S, L).normalize();
-          
-          // Schnittpunkt mit der Ebene y=0 berechnen
-          const t = -this.pts.S.y / dirLicht.y;
-          const S_prime = new THREE.Vector3().copy(dirLicht).multiplyScalar(t).add(this.pts.S);
-          
-          // Lichtstrahl visualisieren (Gerade)
-          const beamMat = new THREE.LineBasicMaterial({ color: 0xffaa00 });
-          const beamGeom = new THREE.BufferGeometry().setFromPoints([L, S_prime]);
-          this.scenario3Group.add(new THREE.Line(beamGeom, beamMat));
-
-          this.addPointLabel("S'", S_prime, '#ffaa00', this.scenario3Group);
-          
-          // Schatten-Polygonzug auf dem Boden (A -> S' -> B)
-          const shadowGeom = new THREE.BufferGeometry().setFromPoints([this.pts.A, S_prime, this.pts.B]);
-          const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
-          const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
-          shadowMesh.position.y = 0.005; // Anheben wg. Z-Fighting
-          this.scenario3Group.add(shadowMesh);
+            this.pyramidGroup.add(label);
+            
+            this.labels.push({ obj: label, name: name, pos: pos });
+          });
         }
 
         createUI() {
-          // Panel erstellen (Schwebende Tafel)
-          const uiPanel = this.uiCore.createCard({
-            name: 'MathUIPanel',
-            sizeX: 1.4,
-            sizeY: 2.0,
-            position: new THREE.Vector3(-1.4, 1.4, -1.2),
-            rotation: new THREE.Euler(0, 0.4, 0),
+          const boardColor = '#2b3a2f'; // Dunkles Tafelgrün
+          const chalkWhite = '#f8f9fa';
+          const chalkYellow = '#fcd34d';
+          const woodColor = '#5c4033'; // Holzrahmen
+
+          const card = this.uiCore.createCard({
+            name: 'MathBoard',
+            sizeX: 1.5,
+            sizeY: 1.2,
+            position: new THREE.Vector3(0, 1.8, -2.2),
             behaviors: [
               new ManipulationBehavior({
                 draggable: true,
-                manipulationMargin: 50,
-                manipulationCornerRadius: 10,
+                manipulationMargin: 100,
+                manipulationCornerRadius: 20,
               }),
             ],
           });
 
-          // Hauptcontainer - Tafel (Dunkelgrün mit Holzrahmen)
-          const container = new UIPanel({
+          // Haupt-Panel der Tafel (Holzrahmen)
+          this.mainPanel = new UIPanel({
             width: '100%',
             height: '100%',
-            fillColor: '#1a2b1f', // Tafelgrün
-            innerShadowColor: 'rgba(0, 0, 0, 0.8)',
-            strokeWidth: 25,
-            strokeColor: '#5c4033', // Holzrahmen braun
+            fillColor: boardColor,
+            strokeWidth: 16,
+            strokeColor: woodColor,
             cornerRadius: 15,
             padding: 40,
             flexDirection: 'column',
             justifyContent: 'flex-start',
-            alignItems: 'stretch',
+            alignItems: 'center',
             gap: 20,
           });
-          uiPanel.add(container);
+          card.add(this.mainPanel);
 
-          // Titel - Kreideschrift
-          const title = new UIText('Vektorgeometrie: Pyramide', {
-            fontSize: 48,
-            fontWeight: 'bold',
-            color: '#f4f4f4', // Kreideweiß
-            textAlign: 'center'
+          // Titel
+          this.mainPanel.add(new UIText('Vektorgeometrie: Pyramide', {
+            fontSize: 60, fontWeight: 'bold', color: chalkWhite
+          }));
+
+          // Aufgaben-Beschreibung (verändert sich je nach Task)
+          this.taskDescText = new UIText('Wähle ein Thema aus, um es im Raum zu erkunden.', {
+            fontSize: 36, color: chalkWhite, textAlign: 'center', width: '90%', flexShrink: 1
           });
-          container.add(title);
+          this.mainPanel.add(this.taskDescText);
 
-          // Erklärtext Container
-          const textContainer = new UIPanel({
-            flexDirection: 'column',
-            padding: 20,
-            fillColor: 'rgba(255,255,255,0.05)',
-            strokeWidth: 2,
-            strokeColor: 'rgba(255,255,255,0.2)', // Leichter Kreiderahmen
-            cornerRadius: 5,
-            height: 330,
-            gap: 15
+          // Hinweis-Box (versteckt/sichtbar)
+          this.hintPanel = new UIPanel({
+            width: '90%', padding: 20, cornerRadius: 10, fillColor: 'rgba(255,255,255,0.1)',
+            flexDirection: 'column', alignItems: 'center', display: 'none'
           });
-          container.add(textContainer);
+          this.hintText = new UIText('', { fontSize: 30, color: chalkYellow, textAlign: 'center' });
+          this.hintPanel.add(this.hintText);
+          this.mainPanel.add(this.hintPanel);
 
-          this.explanationText = new UIText('Wähle eine Aufgabe aus.', {
-            fontSize: 28,
-            color: '#f4f4f4',
-            textAlign: 'left',
-            flexShrink: 1,
-            width: '100%'
+          const topicPanel = new UIPanel({
+            flexDirection: 'row', gap: 20, width: '100%', height: 80, justifyContent: 'center'
           });
-          textContainer.add(this.explanationText);
-
-          this.hintTextObj = new UIText('', {
-            fontSize: 24,
-            color: '#ffb3ba', // Pastell-Rosa (Kreide) für Tipps
-            textAlign: 'left',
-            flexShrink: 1,
-            width: '100%'
-          });
-          textContainer.add(this.hintTextObj);
-
-          // Button Container für Szenarien
-          const buttonContainer = new UIPanel({
-            flexDirection: 'column',
-            gap: 15,
-            width: '100%',
-          });
-          container.add(buttonContainer);
-
-          buttonContainer.add(this.createMenuButton('1. Kantenvektoren', () => this.showScenario(1)));
-          buttonContainer.add(this.createMenuButton('2. Mittelpunkt & Höhe', () => this.showScenario(2)));
-          buttonContainer.add(this.createMenuButton('3. Schattenwurf (Ebenenschnitt)', () => this.showScenario(3)));
-
-          // Container für die neuen Helper-Buttons (Nebeneinander)
-          const helperBtnContainer = new UIPanel({
-            flexDirection: 'row',
-            gap: 15,
-            width: '100%',
-          });
-          container.add(helperBtnContainer);
-
-          // Hilfe-Button (Pastell-Gelb)
-          const hintBtn = this.createMenuButton('Tipp (Hilfe)', () => this.showHint(), 'rgba(255, 255, 200, 0.1)', 'rgba(255, 255, 200, 0.3)', '48%', '#ffffba');
-          helperBtnContainer.add(hintBtn);
-
-          // Koordinaten-Toggle (Pastell-Blau)
-          const coordBtn = this.createMenuButton('Koordinaten: Aus', () => this.toggleCoordinates(), 'rgba(200, 220, 255, 0.1)', 'rgba(200, 220, 255, 0.3)', '48%', '#bae1ff');
-          this.coordBtnText = coordBtn.textComponent;
-          helperBtnContainer.add(coordBtn);
-        }
-
-        createMenuButton(label, onClickCallback, baseColor = 'rgba(255,255,255,0.1)', hoverColor = 'rgba(255,255,255,0.3)', width = '100%', textColor = '#f4f4f4') {
-          let isHovered = false;
           
-          const button = new UIPanel({
-            width: width,
-            height: 70,
-            cornerRadius: 5,
-            fillColor: baseColor,
-            strokeWidth: 2,
-            strokeColor: textColor, // Kreide-Rand passend zum Text
-            justifyContent: 'center',
-            alignItems: 'center',
-            onHoverEnter: () => {
-              isHovered = true;
-              button.setFillColor(hoverColor);
-            },
-            onHoverExit: () => {
-              isHovered = false;
-              button.setFillColor(baseColor);
-            },
+          const createBtn = (label, taskIndex) => {
+            const btn = new UIPanel({
+              width: 220, height: 70, cornerRadius: 10, fillColor: woodColor,
+              justifyContent: 'center', alignItems: 'center',
+              onClick: () => {
+                this.currentTask = taskIndex;
+                this.showHint = false; // Hint bei Wechsel ausblenden
+                this.updateTaskState();
+              }
+            });
+            btn.add(new UIText(label, { fontSize: 32, color: chalkWhite }));
+            return btn;
+          };
+
+          topicPanel.add(createBtn('1. Kanten', 1));
+          topicPanel.add(createBtn('2. Diagonalen', 2));
+          topicPanel.add(createBtn('3. Schatten', 3));
+          this.mainPanel.add(topicPanel);
+
+          const actionPanel = new UIPanel({
+            flexDirection: 'row', gap: 40, width: '100%', height: 80, justifyContent: 'center',
+            marginTop: 'auto' // Drückt die Buttons nach unten
+          });
+
+          // Koordinaten-Toggle
+          this.coordBtn = new UIPanel({
+            width: 300, height: 70, cornerRadius: 35, fillColor: 'rgba(255,255,255,0.2)',
+            strokeWidth: 4, strokeColor: chalkWhite,
+            justifyContent: 'center', alignItems: 'center',
             onClick: () => {
-              // Klick-Feedback
-              button.setFillColor('rgba(255,255,255,0.5)');
-              setTimeout(() => {
-                button.setFillColor(isHovered ? hoverColor : baseColor);
-              }, 150);
-              onClickCallback();
+              this.showCoordinates = !this.showCoordinates;
+              this.updateTaskState();
             }
           });
+          this.coordBtnText = new UIText('Koordinaten: Aus', { fontSize: 28, color: chalkWhite });
+          this.coordBtn.add(this.coordBtnText);
+          actionPanel.add(this.coordBtn);
 
-          const btnText = new UIText(label, {
-            fontSize: 28,
-            color: textColor,
-            fontWeight: 'bold'
+          // Tipp-Toggle
+          this.hintBtn = new UIPanel({
+            width: 250, height: 70, cornerRadius: 35, fillColor: 'rgba(252, 211, 77, 0.3)',
+            strokeWidth: 4, strokeColor: chalkYellow,
+            justifyContent: 'center', alignItems: 'center',
+            onClick: () => {
+              this.showHint = !this.showHint;
+              this.updateTaskState();
+            }
           });
-          button.add(btnText);
-          
-          // Referenz auf den Textkomponenten für spätere Änderungen speichern
-          button.textComponent = btnText;
+          this.hintBtnText = new UIText('Tipp anzeigen', { fontSize: 28, color: chalkYellow });
+          this.hintBtn.add(this.hintBtnText);
+          actionPanel.add(this.hintBtn);
 
-          return button;
+          this.mainPanel.add(actionPanel);
         }
 
-        showHint() {
-          let hint = "";
-          switch(this.currentScenarioId) {
-            case 1:
-              hint = "Tipp: Ein Vektor zwischen 2 Punkten rechnet sich mit 'Spitze minus Fuß'. Für v_AB rechnest du also B - A.";
-              break;
-            case 2:
-              hint = "Tipp: M liegt exakt in der Mitte von A und C. Formel: M = 0.5 * (A + C). Die Höhe h steht senkrecht auf dem Boden.";
-              break;
-            case 3:
-              hint = "Tipp: Stelle die Lichtgerade auf: g: x = S + t*(S-L). Da der Schatten auf dem Boden (y=0) liegt, setze die y-Koordinate der Geraden gleich 0 und löse nach t auf!";
-              break;
-            default:
-              hint = "Wähle zuerst eine Aufgabe, um einen mathematischen Tipp zu erhalten.";
-              break;
-          }
-          if (this.hintTextObj) {
-            this.hintTextObj.setText(hint);
-          }
-        }
-
-        showScenario(id) {
-          this.currentScenarioId = id;
-          this.scenario1Group.visible = false;
-          this.scenario2Group.visible = false;
-          this.scenario3Group.visible = false;
-          
-          // Tipp beim Wechseln zunächst zurücksetzen
-          if(this.hintTextObj) this.hintTextObj.setText('');
-
-          let explanation = "";
-
-          switch(id) {
-            case 1:
-              this.scenario1Group.visible = true;
-              explanation = "Orts- & Richtungsvektoren:\nDie Kanten der Pyramide lassen sich durch Vektoren beschreiben. Der Vektor v_AB berechnet sich aus (B - A). Mit den Basisvektoren v_AB und v_AD wird die Grundfläche aufgespannt.";
-              break;
-            case 2:
-              this.scenario2Group.visible = true;
-              explanation = "Mittelpunkt & Lot:\nDa die Grundfläche ein Quadrat ist, kreuzen sich die Diagonalen exakt im Mittelpunkt M. Der Vektor vom Mittelpunkt zur Spitze S (M -> S) repräsentiert die Höhe h der Pyramide.";
-              break;
-            case 3:
-              this.scenario3Group.visible = true;
-              explanation = "Gerade-Ebene-Schnitt (Schatten):\nEin Lichtstrahl von Quelle L durchläuft die Spitze S. Die Gerade g: x = S + t*(S-L) schneidet die Bodenebene (y=0). Der berechnete Schnittpunkt S' ist der Schattenpunkt der Spitze.";
-              break;
-            default:
-              explanation = "Willkommen! Mit diesem Applet kannst du Vektorgeometrie direkt im dreidimensionalen Raum erkunden. Wähle unten ein Szenario aus, um die Visualisierung zu starten.";
-              break;
+        updateTaskState() {
+          // 1. Alte 3D-Zeichnungen aus Task-Layer entfernen
+          while (this.taskObjects.children.length > 0) {
+            const child = this.taskObjects.children[0];
+            this.taskObjects.remove(child);
+            if(child.geometry) child.geometry.dispose();
           }
 
-          if (this.explanationText) {
-            this.explanationText.setText(explanation);
+          // 2. Texte und Koordinaten aktualisieren
+          this.coordBtnText.text = this.showCoordinates ? 'Koordinaten: An' : 'Koordinaten: Aus';
+          this.labels.forEach(l => {
+            if (this.showCoordinates) {
+              l.obj.text = `${l.name}(${l.pos.x}|${l.pos.y}|${l.pos.z})`;
+            } else {
+              l.obj.text = l.name;
+            }
+            l.obj.sync();
+          });
+
+          // 3. Aufgabenspezifische Inhalte generieren
+          if (this.currentTask === 1) {
+            this.taskDescText.text = "Thema 1: Kantenvektoren\nEin Vektor beschreibt die Verschiebung von einem Punkt zum anderen. Berechne den Vektor von A zur Spitze S.";
+            this.hintText.text = "Tipp:\nNutze die 'Spitze minus Fuß'-Regel:\nVektor AS = S - A";
+            
+            // Pfeil von A nach S zeichnen
+            const dir = new THREE.Vector3().subVectors(this.points.S, this.points.A);
+            const length = dir.length();
+            dir.normalize();
+            const arrow = new THREE.ArrowHelper(dir, this.points.A, length, 0xfcd34d, 0.4, 0.2);
+            this.taskObjects.add(arrow);
+
+          } else if (this.currentTask === 2) {
+            this.taskDescText.text = "Thema 2: Mittelpunkt der Grundfläche\nDie Diagonalen der quadratischen Grundfläche schneiden sich im Mittelpunkt M.";
+            this.hintText.text = "Tipp:\nM ist der Mittelpunkt der Strecke AC (oder BD).\nM = 0.5 * (A + C)";
+
+            // Diagonalen zeichnen
+            const matDash = new THREE.LineDashedMaterial({ color: 0x93c5fd, dashSize: 0.2, gapSize: 0.1 });
+            const geo1 = new THREE.BufferGeometry().setFromPoints([this.points.A, this.points.C]);
+            const geo2 = new THREE.BufferGeometry().setFromPoints([this.points.B, this.points.D]);
+            const line1 = new THREE.Line(geo1, matDash);
+            const line2 = new THREE.Line(geo2, matDash);
+            line1.computeLineDistances();
+            line2.computeLineDistances();
+            this.taskObjects.add(line1, line2);
+
+            // Mittelpunkt markieren
+            const M = new THREE.Vector3().addVectors(this.points.A, this.points.C).multiplyScalar(0.5);
+            const mGeo = new THREE.SphereGeometry(0.15, 16, 16);
+            const mMesh = new THREE.Mesh(mGeo, new THREE.MeshPhongMaterial({ color: 0x93c5fd }));
+            mMesh.position.copy(M);
+            this.taskObjects.add(mMesh);
+            
+            const mLabel = new Text();
+            mLabel.text = this.showCoordinates ? `M(${M.x}|${M.y}|${M.z})` : 'M';
+            mLabel.fontSize = 0.5;
+            mLabel.color = 0x93c5fd;
+            mLabel.position.copy(M).add(new THREE.Vector3(0.2, 0.2, 0));
+            mLabel.sync();
+            this.taskObjects.add(mLabel);
+
+          } else if (this.currentTask === 3) {
+            this.taskDescText.text = "Thema 3: Schattenwurf\nEine Lichtquelle L strahlt auf die Pyramide. Wo trifft der Schatten der Spitze (S') auf den Boden (Ebene y=0)?";
+            this.hintText.text = "Tipp:\nStelle die Geradengleichung g: x = L + t * LS auf.\nSetze die y-Koordinate der Geraden gleich 0.";
+
+            // Lichtquelle
+            const L = this.points.L;
+            const lGeo = new THREE.SphereGeometry(0.2, 16, 16);
+            const lMesh = new THREE.Mesh(lGeo, new THREE.MeshBasicMaterial({ color: 0xfcd34d }));
+            lMesh.position.copy(L);
+            this.taskObjects.add(lMesh);
+
+            // Lichtstrahl L -> S -> Boden
+            const dirLS = new THREE.Vector3().subVectors(this.points.S, L);
+            // Schnittpunkt mit Boden (y=0): L.y + t * dirLS.y = 0  => t = -L.y / dirLS.y
+            const t = -L.y / dirLS.y;
+            const S_prime = new THREE.Vector3().copy(L).add(dirLS.clone().multiplyScalar(t));
+
+            // Strahl zeichnen
+            const rayGeo = new THREE.BufferGeometry().setFromPoints([L, S_prime]);
+            const rayLine = new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0xfcd34d }));
+            this.taskObjects.add(rayLine);
+
+            // Schattenpunkt S' markieren
+            const spGeo = new THREE.SphereGeometry(0.15, 16, 16);
+            const spMesh = new THREE.Mesh(spGeo, new THREE.MeshBasicMaterial({ color: 0x555555 }));
+            spMesh.position.copy(S_prime);
+            this.taskObjects.add(spMesh);
+
+            const spLabel = new Text();
+            spLabel.text = this.showCoordinates ? `S'(${S_prime.x.toFixed(1)}|0|${S_prime.z.toFixed(1)})` : "S'";
+            spLabel.fontSize = 0.5;
+            spLabel.color = 0xfcd34d;
+            spLabel.position.copy(S_prime).add(new THREE.Vector3(0.2, 0.2, 0));
+            spLabel.sync();
+            this.taskObjects.add(spLabel);
+
+            // Schattenfläche zeichnen (A-B-C-D-S') - Zur Vereinfachung verbinden wir S' mit den Basisecken
+            const shadowMat = new THREE.LineBasicMaterial({ color: 0x555555 });
+            const corners = [this.points.A, this.points.B, this.points.C, this.points.D];
+            corners.forEach(p => {
+              const sGeo = new THREE.BufferGeometry().setFromPoints([p, S_prime]);
+              this.taskObjects.add(new THREE.Line(sGeo, shadowMat));
+            });
+          } else {
+            // Task 0: Keine Auswahl
+            this.taskDescText.text = "Wähle ein Thema aus, um es im Raum zu erkunden.";
           }
+
+          // UI Sichtbarkeiten für Hinweise anpassen
+          this.hintPanel.display = (this.showHint && this.currentTask > 0) ? 'flex' : 'none';
+          this.hintBtnText.text = this.showHint ? 'Tipp ausblenden' : 'Tipp anzeigen';
         }
 
         update() {
           const camera = xb.core.camera;
-          
-          // Alle Punkt-Labels zur Kamera drehen
-          this.labels.forEach(info => {
-             info.label.quaternion.copy(camera.quaternion);
+          // Basis-Labels drehen
+          this.labels.forEach(l => {
+            l.obj.quaternion.copy(camera.quaternion);
           });
-
-          // Auch die Text-Labels von Vektorpfeilen zur Kamera drehen
-          const updateArrowLabels = (group) => {
-            group.children.forEach(child => {
-               if (child.type === 'ArrowHelper') {
-                   child.children.forEach(arrowChild => {
-                       if (arrowChild.isMesh && arrowChild.text !== undefined) {
-                           arrowChild.quaternion.copy(camera.quaternion);
-                       }
-                   });
-               }
-            });
-          };
-          
-          updateArrowLabels(this.scenario1Group);
-          updateArrowLabels(this.scenario2Group);
+          // Task-Labels (wie M oder S') drehen
+          this.taskObjects.children.forEach(child => {
+            if (child.isText) {
+              child.quaternion.copy(camera.quaternion);
+            }
+          });
         }
       }
 
-      document.addEventListener('DOMContentLoaded', async () => {
+      document.addEventListener('DOMContentLoaded', async function () {
         const options = new xb.Options();
-        options.enableUI();
-        // UIKit explizit aktivieren (erforderlich für uiblocks)
+        options.enableUI(); // UIKit aktivieren
         options.uikit.enable(uikit);
-        options.setAppTitle('Vektorgeometrie AR');
+        options.setAppTitle('Vektorgeometrie im AR');
         
-        xb.add(new MathPyramidApplet());
+        // Fügt unser Skript zur XR Blocks Engine hinzu
+        xb.add(new PyramidMathApplet());
+        
+        // Initialisiert die Anwendung
         await xb.init(options);
       });
     </script>
